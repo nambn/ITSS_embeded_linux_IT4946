@@ -19,8 +19,8 @@
 int loopFlag = LOOP_ON;
 
 // fuction to handle each signal
-void sigHandleSIGALRM (int sigNo);
-void sigHandleSIGINT (int sigNo);
+void sigHandleSIGALRM ();
+void sigHandleSIGINT ();
 
 int main(int argc, char const *argv[]) {
 	if (argc != 2) {
@@ -43,7 +43,7 @@ int main(int argc, char const *argv[]) {
 	}
 }
 
-void sigHandleSIGALRM (int sigNo)
+void sigHandleSIGALRM ()
 {
 	printf("CAT ATTACK!!!\n");
 	usleep(500000);
@@ -51,8 +51,8 @@ void sigHandleSIGALRM (int sigNo)
 	exit(SIG_OK);
 }
 
-void sigHandleSIGINT (int sigNo)
+void sigHandleSIGINT ()
 {
-	printf("Cat died.\n");
+	printf("at died.\n");
 	exit(SIG_OK);
 }
