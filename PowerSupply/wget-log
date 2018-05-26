@@ -1,0 +1,16 @@
+--2018-05-27 01:57:58--  https://l.facebook.com/l.php?u=https%3A%2F%2Fcdn.fbsbx.com%2Fv%2Ft59.2708-21%2F21298056_1384746761622759_8297985474249621504_n.c%2Fex1_client.c%3F_nc_cat%3D0%26oh%3Dd5dbd9647f2f236f57431ab75884473f%26oe%3D5B0C8D7C%26dl%3D1
+Resolving l.facebook.com (l.facebook.com)... 157.240.15.36, 2a03:2880:f102:184:face:b00c:0:14c9
+Connecting to l.facebook.com (l.facebook.com)|157.240.15.36|:443... connected.
+HTTP request sent, awaiting response... 302 Found
+Location: https://www.facebook.com/unsupportedbrowser [following]
+--2018-05-27 01:57:58--  https://www.facebook.com/unsupportedbrowser
+Resolving www.facebook.com (www.facebook.com)... 157.240.15.38, 2a03:2880:f102:186:face:b00c:0:50fb
+Connecting to www.facebook.com (www.facebook.com)|157.240.15.38|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: unspecified [text/html]
+Saving to: ‘l.php?u=https:%2F%2Fcdn.fbsbx.com%2Fv%2Ft59.2708-21%2F21298056_1384746761622759_8297985474249621504_n.c%2Fex1_client.c?_nc_cat=0&oh=d5dbd9647f2f236f57431ab75884473f&oe=5B0C8D7C&dl=1’
+
+                   l.php?u=https:%2F%     [<=>                                                                     ]       0  --.-KB/s                                 l.php?u=https:%2F%2     [ <=>                                                                    ] 218.46K  1.06MB/s               l.php?u=https:%2F%2Fcdn.fbsbx.com%2Fv     [  <=>                                                                   ] 356.78K  1.39MB/s    in 0.3s    
+
+2018-05-27 01:57:59 (1.39 MB/s) - ‘l.php?u=https:%2F%2Fcdn.fbsbx.com%2Fv%2Ft59.2708-21%2F21298056_1384746761622759_8297985474249621504_n.c%2Fex1_client.c?_nc_cat=0&oh=d5dbd9647f2f236f57431ab75884473f&oe=5B0C8D7C&dl=1’ saved [365343]
+
