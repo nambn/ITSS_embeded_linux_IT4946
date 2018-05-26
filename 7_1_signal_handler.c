@@ -1,10 +1,9 @@
-/**
- * @Author: nam
- * @Date:   2018-02-27T10:41:46+07:00
- * @Email:  pegasis2012@gmail.com
- * @Last modified by:   nam
- * @Last modified time: 2018-02-27T10:48:30+07:00
- */
+/*
+* @Author: Nam
+* @Date:   2018-05-15 01:14:33
+* @Last Modified by:   Nam
+* @Last Modified time: 2018-05-15 01:16:22
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
