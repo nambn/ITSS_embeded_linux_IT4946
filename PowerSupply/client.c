@@ -68,9 +68,27 @@ int main(int argc, char const *argv[])
 	}
 
 	// Then, open menu for user
-	while(1) {
+	do {
+		printf(
+			"\n---- MENU ----\n"
+			"0. Turn off\n"
+			"1. Normal mode\n"
+			"2. Power saving mode\n"
+			"(Choose 0,1 or 2, others to disconnect): ");
 
-	}
+		char menu = getchar();
+		getchar();
+
+		switch (menu) {
+			case '0': printf("TURN OFF\n"); break;
+			case '1': printf("NORMAL MODE\n"); break;
+			case '2': printf("POWER SAVING MODE\n"); break;
+			default: menu = '3'; printf("DISCONNECTED\n");
+		}
+		send(client_sock, &menu, 1, 0);
+		if (menu == '3')
+			break;
+	} while (1);
 
     // Step 5: Close socket
 	close(client_sock);

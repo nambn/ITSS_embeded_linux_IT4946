@@ -57,12 +57,17 @@ void powerSupply_handle(int conn_sock) {
 	while(1) {
 		bytes_received = recv(conn_sock, recv_data, BUFF_SIZE-1, 0);
 		if (bytes_received <= 0) {
-			tprintf("Device [%s] disconnected\n", name);
+			tprintf("Device [%s] disconnected\n\n", name);
+			powerSupply_count--;
 			kill(getpid(), SIGKILL);
 			break;
 		} else {
 			recv_data[bytes_received] = '\0';
 		}
+		
+		////////////////////////////
+		// Create device instance //
+		////////////////////////////
 		
 		if (is_first_message) {
 			is_first_message = 0;
@@ -73,12 +78,21 @@ void powerSupply_handle(int conn_sock) {
 			tprintf("      limit: %dW\n", mode_3);
 			tprintf("   use mode: %s\n", use_mode[0]);
 			tprintf("-----------------------------\n\n");
+			continue;
 		}
+
+		int menu = atoi(recv_data);
+		tprintf("%d\n",menu);
 
 	} // endwhile
 }
 
 void connectMng_handle() {
+
+	///////////////////////
+	// Connect to client //
+	///////////////////////
+
     //Step 1: Construct a TCP socket to listen connection request
 	if ((listen_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		tprintf("socket() failed\n");
@@ -116,17 +130,17 @@ void connectMng_handle() {
 			continue;
 		} 
 
-		if (powerSupply == 0){
-			// powerSupply ps
+		if (powerSupply == 0) { 
+			//child
 			close(listen_sock);
 			powerSupply_handle(conn_sock);
 			close(conn_sock);
-		} else {
-			// connectMng ps
+		} else { 
+			//parent
 			close(conn_sock);
 			powerSupply_count++;
-			tprintf("\nA device connected, connectMng forked process powerSupply(%d) --- pid: %d.\n", powerSupply_count, powerSupply);
-		} // end parent/child branch
+			tprintf("A device connected, connectMng forked process powerSupply(%d) --- pid: %d.\n", powerSupply_count, powerSupply);
+		}
 	} //end communication
 
 	close(listen_sock);
@@ -154,15 +168,21 @@ int main(int argc, char const *argv[])
 	// start child process in SERVER //
 	///////////////////////////////////
 	
-	connectMng = fork();
-
-	if (connectMng > 0) {
-		tprintf("SERVER forked process connectMng ------------------------------- pid: %d.\n", connectMng);
-		waitpid(connectMng, NULL, 0);
-		tprintf("SERVER exited\n\n");
-	} else if (connectMng == 0) {
+	if ((connectMng = fork()) == 0) {
 		connectMng_handle();
+	} else if ((elePowerCtrl = fork()) == 0) {
+		elePowerCtrl_handle();
+	} else if ((powSupplyInfoAccess = fork()) == 0) {
+		powSupplyInfoAccess_handle();
+	} else {
+		tprintf("SERVER forked process connectMng ------------------ pid: %d.\n", connectMng);
+		tprintf("SERVER forked process elePowerCtrl ---------------- pid: %d.\n", elePowerCtrl);
+		tprintf("SERVER forked process powSupplyInfoAccess --------- pid: %d.\n\n", powSupplyInfoAccess);
+		waitpid(connectMng, NULL, 0);
+		waitpid(elePowerCtrl, NULL, 0);
+		waitpid(powSupplyInfoAccess, NULL, 0);
+		tprintf("SERVER exited\n\n");
 	}
-
+	
 	return 0;
 }
