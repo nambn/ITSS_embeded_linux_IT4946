@@ -1,5 +1,5 @@
 CC = gcc
-CFLAG = -std=c99
+CFLAG = 
 
 all: server client
 
