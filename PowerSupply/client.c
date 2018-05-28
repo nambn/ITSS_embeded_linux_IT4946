@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
+#include <time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -73,16 +74,26 @@ int main(int argc, char const *argv[])
 			bytes_received = recv(client_sock, buff, BUFF_SIZE-1, 0);
 			if (bytes_received <= 0) {
 				// if DISCONNECT
+				printf("\nServer shuted down.\n");
 				break;
 			} else {
 				buff[bytes_received] = '\0';
 			}
+
+			int buff_i = atoi(buff);
+			// if (buff_i = 9) => max device reached => quit
+
+			if (buff_i == 9) {
+				printf("Max devices reached. Can't connect to server\n");
+			}
+
 		} 
 	} else {
 		// Parent: open menu for user
 		do {
+			sleep(1);
 			printf(
-				"\n---- MENU ----\n"
+				"---- MENU ----\n"
 				"0. Turn off\n"
 				"1. Normal mode\n"
 				"2. Power saving mode\n"

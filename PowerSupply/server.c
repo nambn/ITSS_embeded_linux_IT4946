@@ -50,7 +50,6 @@ typedef struct {
 	int limit;
 	int mode;
 } device_t;
-
 device_t *devices;
 
 int tprintf(const char* fmt, ...){
@@ -77,7 +76,6 @@ void powerSupply_handle(int conn_sock) {
 			break;
 	}
 	while(1) {
-
 		///////////////////
 		// listen on tcp //
 		///////////////////
@@ -119,7 +117,6 @@ void powerSupply_handle(int conn_sock) {
 } // end function
 
 void connectMng_handle() {
-
 	///////////////////////
 	// Connect to client //
 	///////////////////////
@@ -155,6 +152,14 @@ void connectMng_handle() {
 			continue;
 		}
 
+		// if 11-th device connect to SERVER
+		if (powerSupply_count == MAX_DEVICE) {
+			char re = '9';
+            if ((bytes_sent = send(conn_sock, &re, 1, 0)) <= 0)
+                tprintf("send() failed\n");
+			close(conn_sock);
+			break;
+		}
 
 		if ((powerSupply = fork()) < 0){
 			tprintf("powerSupply fork() failed\n");
@@ -170,7 +175,7 @@ void connectMng_handle() {
 			//parent
 			close(conn_sock);
 			powerSupply_count++;
-			tprintf("A device connected, connectMng forked process powerSupply --- pid: %d.\n", powerSupply);
+			tprintf("A device connected, connectMng forked new process powerSupply --- pid: %d.\n", powerSupply);
 		}
 	} //end communication
 
@@ -221,9 +226,9 @@ int main(int argc, char const *argv[])
 	} else if ((powSupplyInfoAccess = fork()) == 0) {
 		powSupplyInfoAccess_handle();
 	} else {
-		tprintf("SERVER forked process connectMng ------------------ pid: %d.\n", connectMng);
-		tprintf("SERVER forked process elePowerCtrl ---------------- pid: %d.\n", elePowerCtrl);
-		tprintf("SERVER forked process powSupplyInfoAccess --------- pid: %d.\n\n", powSupplyInfoAccess);
+		tprintf("SERVER forked new process connectMng ------------------ pid: %d.\n", connectMng);
+		tprintf("SERVER forked new process elePowerCtrl ---------------- pid: %d.\n", elePowerCtrl);
+		tprintf("SERVER forked new process powSupplyInfoAccess --------- pid: %d.\n\n", powSupplyInfoAccess);
 		waitpid(connectMng, NULL, 0);
 		waitpid(elePowerCtrl, NULL, 0);
 		waitpid(powSupplyInfoAccess, NULL, 0);
