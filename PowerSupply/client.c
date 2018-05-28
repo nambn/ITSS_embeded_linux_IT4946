@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -23,7 +24,7 @@ int main(int argc, char const *argv[])
 	}
 
 	// Get info for device
-	char name[50] = "TV";
+	char name[50] = "T fucking V";
 	int mode_2 = 2300;
 	int mode_3 = 2000;
 	int use_mode = 1;
@@ -43,8 +44,7 @@ int main(int argc, char const *argv[])
 	server_addr.sin_addr.s_addr = inet_addr(argv[1]);
 
     // Step 3: Request to connect server
-	if (connect(client_sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) < 0)
-	{
+	if (connect(client_sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) < 0) {
 		perror("accept() failed\n");
 		exit(1);
 	}
@@ -67,30 +67,44 @@ int main(int argc, char const *argv[])
 		exit(1);
 	}
 
-	// Then, open menu for user
-	do {
-		printf(
-			"\n---- MENU ----\n"
-			"0. Turn off\n"
-			"1. Normal mode\n"
-			"2. Power saving mode\n"
-			"(Choose 0,1 or 2, others to disconnect): ");
+	if (fork() == 0) {
+		// Child: listen from server
+		while(1) {
+			bytes_received = recv(client_sock, buff, BUFF_SIZE-1, 0);
+			if (bytes_received <= 0) {
+				// if DISCONNECT
+				break;
+			} else {
+				buff[bytes_received] = '\0';
+			}
+		} 
+	} else {
+		// Parent: open menu for user
+		do {
+			printf(
+				"\n---- MENU ----\n"
+				"0. Turn off\n"
+				"1. Normal mode\n"
+				"2. Power saving mode\n"
+				"(Choose 0,1 or 2, others to disconnect): ");
 
-		char menu = getchar();
-		getchar();
+			char menu = getchar();
+			getchar();
 
-		switch (menu) {
-			case '0': printf("TURN OFF\n"); break;
-			case '1': printf("NORMAL MODE\n"); break;
-			case '2': printf("POWER SAVING MODE\n"); break;
-			default: menu = '3'; printf("DISCONNECTED\n");
-		}
-		send(client_sock, &menu, 1, 0);
-		if (menu == '3')
-			break;
-	} while (1);
+			switch (menu) {
+				case '0': printf("TURN OFF\n"); break;
+				case '1': printf("NORMAL MODE\n"); break;
+				case '2': printf("POWER SAVING MODE\n"); break;
+				default: menu = '3'; printf("DISCONNECTED\n");
+			}
+			if (menu == '3')
+				break;
+			send(client_sock, &menu, 1, 0);
+		} while (1);
+	}
 
     // Step 5: Close socket
 	close(client_sock);
+    kill(0, SIGKILL);
 	return 0;
 }

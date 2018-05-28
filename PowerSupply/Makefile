@@ -1,10 +1,12 @@
 CC = gcc
 CFLAG = 
+SERVER_FILES = server.c
+CLIENT_FILES = client.c
 
 all: server client
 
-server: server.c single-linked-list-lib.c
-	$(CC) $(CFLAG) -o server server.c single-linked-list-lib.c
+server: $(SERVER_FILES) 
+	$(CC) $(CFLAG) -o server $(SERVER_FILES)
 
-client: client.c
-	$(CC) $(CFLAG) -o client client.c
+client: $(CLIENT_FILES)
+	$(CC) $(CFLAG) -o client $(CLIENT_FILES)
