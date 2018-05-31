@@ -1,6 +1,6 @@
 
 ## IT4946 
-- [Weekly excercise](.)
+- Weekly excercise (This folder)
 - [Power Supply](./PowerSupply)
 
 ```

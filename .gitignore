@@ -1,3 +1,4 @@
 Embedded Linux/
 VendingMachine/
 PowerSupply/log/*
+!PowerSupply/log/this_is_log_storage.txt
