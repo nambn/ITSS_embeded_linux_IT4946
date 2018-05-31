@@ -103,9 +103,9 @@ int main(int argc, char const *argv[])
 			getchar();
 
 			switch (menu) {
-				case '0': printf("TURN OFF\n"); break;
-				case '1': printf("NORMAL MODE\n"); break;
-				case '2': printf("POWER SAVING MODE\n"); break;
+				case '0': printf("TURN OFF\n\n"); break;
+				case '1': printf("NORMAL MODE\n\n"); break;
+				case '2': printf("POWER SAVING MODE\n\n"); break;
 				default: menu = '3'; printf("DISCONNECTED\n");
 			}
 			if (menu == '3')

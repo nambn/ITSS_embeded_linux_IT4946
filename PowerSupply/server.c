@@ -44,26 +44,32 @@ struct sockaddr_in server;
 struct sockaddr_in client;
 int sin_size;
 char use_mode[][10] = {"off", "normal", "limited"};
-key_t key_d = 1234, key_m = 5678; //device storage, message queue
-int shmid_d, msqid; //device storage, message queue
+key_t key_s = 9999, key_d = 1234, key_m = 5678; //system info, device storage, message queue
+int shmid_s, shmid_d, msqid; //system info, device storage, message queue
 FILE *log_server;
+
+// power system struct
+typedef struct {
+	int current_power;
+	int threshold_over;
+	int supply_over;
+} powsys_t;
+powsys_t *powsys;
 
 // device struct
 typedef struct {
 	int pid;
 	char name[50];
-	int normal;
-	int limit;
+	int use_power[3];
 	int mode;
 } device_t;
 device_t *devices;
 
-// message struct
-// mtype = 1 -> logWrite_handle
-// mtype = 2 -> elePowerCtrl_handle
-// le message:
-// mtext = "<char>|<int>|<string>|"
-// 
+/**
+ * message struct
+ * mtype = 1 -> logWrite_handle
+ * mtype = 2 -> powSupplyInfoAccess_handle
+ */
 typedef struct {
 	long mtype;
 	char mtext[MAX_MESSAGE_LENGTH];
@@ -98,7 +104,7 @@ void powerSupply_handle(int conn_sock) {
 		bytes_received = recv(conn_sock, recv_data, BUFF_SIZE-1, 0);
 		if (bytes_received <= 0) {
 			// if DISCONNECT
-			// send message to elePowerCtrl
+			// send message to powSupplyInfoAccess
 			msg_t new_msg;
 			new_msg.mtype = 2;
 			sprintf(new_msg.mtext, "d|%d|", getpid()); // n for DISS
@@ -113,14 +119,14 @@ void powerSupply_handle(int conn_sock) {
 			recv_data[bytes_received] = '\0';
 			if (is_first_message) {
 				is_first_message = 0;
-				// send message to elePowerCtrl
+				// send device info to powSupplyInfoAccess
 				msg_t new_msg;
 				new_msg.mtype = 2;
 				sprintf(new_msg.mtext, "n|%d|%s|", getpid(), recv_data); // n for NEW
 				msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
 			} else {
 				// if not first time client send
-				// send message to elePowerCtrl
+				// send mode to powSupplyInfoAccess
 				msg_t new_msg;
 				new_msg.mtype = 2;
 				sprintf(new_msg.mtext, "m|%d|%s|", getpid(), recv_data); // m for MODE
@@ -196,7 +202,7 @@ void connectMng_handle() {
 	close(listen_sock);
 } //end function connectMng_handle
 
-void elePowerCtrl_handle() {
+void powSupplyInfoAccess_handle() {
 	// mtype = 2
 	msg_t got_msg;
 
@@ -208,15 +214,19 @@ void elePowerCtrl_handle() {
 		exit(1);
 	}
 
+	if ((powsys = (powsys_t*) shmat(shmid_s, (void*) 0, 0)) == (void*)-1) {
+		tprintf("shmat() failed\n");
+		exit(1);
+	}
+
 	// check mail
 	while(1) {
 		// got mail!
 		if (msgrcv(msqid, &got_msg, MAX_MESSAGE_LENGTH, 2, 0) <= 0) {
-
 			tprintf("msgrcv() error");
 			exit(1);
 		}
-
+		puts(got_msg.mtext);
 		// header = 'n' => Create new device
 		if (got_msg.mtext[0] == 'n') {
 			int no;
@@ -224,27 +234,27 @@ void elePowerCtrl_handle() {
 				if (devices[no].pid == 0)
 					break;
 			}
-
 			sscanf(got_msg.mtext, "%*c|%d|%[^|]|%d|%d|",
 				&devices[no].pid,
 				devices[no].name,
-				&devices[no].normal,
-				&devices[no].limit);
+				&devices[no].use_power[1],
+				&devices[no].use_power[2]);
 			devices[no].mode = 0;
 			tprintf("--- Connected device info ---\n");
 			tprintf("       name: %s\n", devices[no].name);
-			tprintf("     normal: %dW\n", devices[no].normal);
-			tprintf("      limit: %dW\n", devices[no].limit);
+			tprintf("     normal: %dW\n", devices[no].use_power[1]);
+			tprintf("      limit: %dW\n", devices[no].use_power[2]);
 			tprintf("   use mode: %s\n", use_mode[devices[no].mode]);
 			tprintf("-----------------------------\n\n");
+			tprintf("System power using: %dW\n", powsys->current_power);
 
 			// send message to logWrite
 			msg_t new_msg;
 			new_msg.mtype = 1;
 			sprintf(new_msg.mtext, "s|[%s] connected (Normal use: %dW, Linited use: %dW)|", 
 				devices[no].name, 
-				devices[no].normal, 
-				devices[no].limit);
+				devices[no].use_power[1], 
+				devices[no].use_power[2]);
 			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
 
 			sprintf(new_msg.mtext, "s|Device [%s] set mode to [off] ~ using 0W|", devices[no].name);
@@ -259,12 +269,15 @@ void elePowerCtrl_handle() {
 
 			for (no = 0; no < MAX_DEVICE; no++) {
 				if (devices[no].pid == temp_pid)
-					devices[no].mode = temp_mode;
-				break;
+					break;
 			}
-			tprintf("Device [%s] change mode to [%s]\n", 
+			devices[no].mode = temp_mode;
+
+			tprintf("Device [%s] change mode to [%s], comsume %dW\n", 
 				devices[no].name, 
-				use_mode[devices[no].mode]);
+				use_mode[devices[no].mode],
+				devices[no].use_power[devices[no].mode]);
+			tprintf("System power using: %dW\n", powsys->current_power);
 		}
 
 		// header = 'd' => Disconnect
@@ -277,8 +290,9 @@ void elePowerCtrl_handle() {
 					tprintf("Device [%s] disconnected\n\n", devices[no].name);
 					devices[no].pid = 0;
 					strcpy(devices[no].name, "");
-					devices[no].normal = 0;
-					devices[no].limit = 0;
+					devices[no].use_power[0] = 0;
+					devices[no].use_power[1] = 0;
+					devices[no].use_power[2] = 0;
 					devices[no].mode = 0;
 					break;
 				} else {
@@ -286,22 +300,67 @@ void elePowerCtrl_handle() {
 				}
 			}
 		}
-	} // endwhile
-} //end function elePowerCtrl_handle
 
-void powSupplyInfoAccess_handle() {
-	while(1) {
-		
 	} // endwhile
 } //end function powSupplyInfoAccess_handle
+
+void elePowerCtrl_handle() {
+	//////////////////////////////
+	// Connect to shared memory //
+	//////////////////////////////
+	if ((devices = (device_t*) shmat(shmid_d, (void*) 0, 0)) == (void*)-1) {
+		tprintf("shmat() failed\n");
+		exit(1);
+	}
+
+	if ((powsys = (powsys_t*) shmat(shmid_s, (void*) 0, 0)) == (void*)-1) {
+		tprintf("shmat() failed\n");
+		exit(1);
+	}
+
+	int i;
+
+	while(1) {
+		// get total power using
+		int temp = 0;
+		for (i = 0; i < MAX_DEVICE; i++)
+			temp += devices[i].use_power[devices[i].mode];
+		powsys->current_power = temp;
+
+		// check threshold
+		if (powsys->current_power >= POWER_THRESHOLD) {
+			powsys->supply_over = 1;
+			powsys->threshold_over = 1;
+		} else if (powsys->current_power >= WARNING_THRESHOLD) {
+			powsys->supply_over = 0;
+			powsys->threshold_over = 1;
+		} else {
+			powsys->supply_over = 0;
+			powsys->threshold_over = 0;
+		}
+	} // endwhile
+} //end function elePowerCtrl_handle
 
 void logWrite_handle() { 
 	// mtype == 1
 	msg_t got_msg;
 
-	//////////////////////
-	// Create sever log //
-	//////////////////////
+	//////////////////////////////
+	// Connect to shared memory //
+	//////////////////////////////
+	if ((devices = (device_t*) shmat(shmid_d, (void*) 0, 0)) == (void*)-1) {
+		tprintf("shmat() failed\n");
+		exit(1);
+	}
+
+	if ((powsys = (powsys_t*) shmat(shmid_s, (void*) 0, 0)) == (void*)-1) {
+		tprintf("shmat() failed\n");
+		exit(1);
+	}
+
+	///////////////////////////
+	// Create sever log file //
+	///////////////////////////
 	char file_name[255];
 	time_t t = time(NULL);
 	struct tm * now = localtime(&t);
@@ -329,6 +388,7 @@ void logWrite_handle() {
 			strftime(log_time, sizeof(log_time), "%Y/%m/%d_%H:%M:%S", now);
 			// write log
 			fprintf(log_server, "%s | %s\n", log_time, buff);
+			fprintf(log_server, "%s | Current power: %d\n", log_time, powsys->current_power);
 		}
 	}
 } //end function logWrite_handle
@@ -342,6 +402,21 @@ int main(int argc, char const *argv[])
 	server_port = atoi(argv[1]);
 	printf("SERVER start, PID is %d.\n", getpid());
 
+	///////////////////////////////////////////
+	// Create shared memory for power system //
+	///////////////////////////////////////////
+	if ((shmid_s = shmget(key_s, sizeof(powsys_t), 0644 | IPC_CREAT)) < 0) {
+		tprintf("shmget() failed\n");
+		exit(1);
+	}
+	if ((powsys = (powsys_t*) shmat(shmid_s, (void*) 0, 0)) == (void*)-1) {
+		tprintf("shmat() failed\n");
+		exit(1);
+	}
+	powsys->current_power = 0;
+	powsys->threshold_over = 0;
+	powsys->supply_over = 0;
+
 	/////////////////////////////////////////////
 	// Create shared memory for devices storage//
 	/////////////////////////////////////////////
@@ -349,7 +424,6 @@ int main(int argc, char const *argv[])
 		tprintf("shmget() failed\n");
 		exit(1);
 	}
-
 	if ((devices = (device_t*) shmat(shmid_d, (void*) 0, 0)) == (void*)-1) {
 		tprintf("shmat() failed\n");
 		exit(1);
@@ -360,8 +434,9 @@ int main(int argc, char const *argv[])
 	for (i = 0; i < MAX_DEVICE; i++) {
 		devices[i].pid = 0;
 		strcpy(devices[i].name, "");
-		devices[i].normal = 0;
-		devices[i].limit = 0;
+		devices[i].use_power[0] = 0;
+		devices[i].use_power[1] = 0;
+		devices[i].use_power[2] = 0;
 		devices[i].mode = 0;
 	}
 
