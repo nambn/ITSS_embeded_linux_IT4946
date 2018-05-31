@@ -2,7 +2,7 @@
 * @Author: Nam
 * @Date:   2018-05-30 08:18:39
 * @Last Modified by:   Nam
-* @Last Modified time: 2018-05-30 09:24:37
+* @Last Modified time: 2018-05-31 23:06:09
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +12,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <signal.h>
+#include <stddef.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -19,7 +20,7 @@
 #include <sys/wait.h>
 #include <sys/shm.h>
 #include <sys/ipc.h>
-
+#include <sys/msg.h>
 
 int main(int argc, char const *argv[])
 {

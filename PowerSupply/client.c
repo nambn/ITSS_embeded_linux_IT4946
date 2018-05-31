@@ -56,7 +56,7 @@ int main(int argc, char const *argv[])
 	sprintf(buff, "%s|%d|%d", name, mode_2, mode_3);
 	msg_len = strlen(buff);
 	if (msg_len == 0) {
-		printf("no info on device\n");
+		printf("No info on device\n");
 		close(client_sock);
 		exit(1);
 	}
@@ -67,6 +67,7 @@ int main(int argc, char const *argv[])
 		exit(1);
 	}
 
+	// Then, wait for server response
 	if (fork() == 0) {
 		// Child: listen from server
 		while(1) {

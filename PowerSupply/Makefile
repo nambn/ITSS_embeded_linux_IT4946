@@ -10,3 +10,6 @@ server: $(SERVER_FILES)
 
 client: $(CLIENT_FILES)
 	$(CC) $(CFLAG) -o client $(CLIENT_FILES)
+
+clean: 
+	$(RM) log/*

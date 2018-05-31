@@ -13,6 +13,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <signal.h>
+#include <stddef.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -20,6 +21,7 @@
 #include <sys/wait.h>
 #include <sys/shm.h>
 #include <sys/ipc.h>
+#include <sys/msg.h>
 
 #define POWER_THRESHOLD 5000
 #define WARNING_THRESHOLD 4500
@@ -27,7 +29,7 @@
 #define BUFF_SIZE 8192
 #define MAX_DEVICE 10
 #define MAX_LOG_DEVICE 100
-#define MESSAGE_MAX 255
+#define MAX_MESSAGE_LENGTH 1000
 
 ////////////////////
 // Variables list //
@@ -42,12 +44,9 @@ struct sockaddr_in server;
 struct sockaddr_in client;
 int sin_size;
 char use_mode[][10] = {"off", "normal", "limited"};
-key_t key_d = 1234, key_m = 5678; //device, message
-int shmid_d, shmid_m; //device, message
+key_t key_d = 1234, key_m = 5678; //device storage, message queue
+int shmid_d, msqid; //device storage, message queue
 FILE *log_server;
-FILE *log_client[MAX_LOG_DEVICE];
-int log_client_count = 0;
-char *message; //ipc
 
 // device struct
 typedef struct {
@@ -59,9 +58,16 @@ typedef struct {
 } device_t;
 device_t *devices;
 
-// typedef struct {
-// 	int 
-// } system_info_t;
+// message struct
+// mtype = 1 -> logWrite_handle
+// mtype = 2 -> elePowerCtrl_handle
+// le message:
+// mtext = "<char>|<int>|<string>|"
+// 
+typedef struct {
+	long mtype;
+	char mtext[MAX_MESSAGE_LENGTH];
+} msg_t;
 
 int tprintf(const char* fmt, ...){
 	va_list args;
@@ -74,35 +80,16 @@ int tprintf(const char* fmt, ...){
 }
 
 void sigHandleSIGINT () {
+	msgctl(msqid, IPC_RMID, NULL);
+	shmctl(shmid_d, IPC_RMID, NULL);
 	fclose(log_server);
 	kill(0, SIGKILL);
 	exit(0);
 }
 
 void powerSupply_handle(int conn_sock) {
+	// check if this is first time client sent
 	int is_first_message = 1;
-	int no;
-
-	//////////////////////////////
-	// connect to shared memory //
-	//////////////////////////////
-	// for devices
-	if ((devices = (device_t*) shmat(shmid_d, (void*) 0, 0)) == (void*)-1) {
-		tprintf("shmat() failed\n");
-		exit(1);
-	}
-	// search for avaible slot, assign it to no.
-	for (no = 0; no < MAX_DEVICE; no++) {
-		if (devices[no].pid == 0)
-			break;
-	}
-
-	// for ipc
-	char *mess;
-	if ((mess = (char*) shmat(shmid_m, (void*) 0, 0)) == (void*)-1) {
-		tprintf("shmat() failed\n");
-		exit(1);
-	}
 
 	while(1) {
 		///////////////////
@@ -111,40 +98,37 @@ void powerSupply_handle(int conn_sock) {
 		bytes_received = recv(conn_sock, recv_data, BUFF_SIZE-1, 0);
 		if (bytes_received <= 0) {
 			// if DISCONNECT
-			tprintf("Device [%s] disconnected\n\n", devices[no].name);
-			devices[no].pid = 0;
-			strcpy(devices[no].name, "");
-			devices[no].normal = 0;
-			devices[no].limit = 0;
-			devices[no].mode = 0;
+			// send message to elePowerCtrl
+			msg_t new_msg;
+			new_msg.mtype = 2;
+			sprintf(new_msg.mtext, "d|%d|", getpid()); // n for DISS
+			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+
 			powerSupply_count--;
+			// kill this process
 			kill(getpid(), SIGKILL);
 			break;
 		} else {
+			// if receive message from client
 			recv_data[bytes_received] = '\0';
+			if (is_first_message) {
+				is_first_message = 0;
+				// send message to elePowerCtrl
+				msg_t new_msg;
+				new_msg.mtype = 2;
+				sprintf(new_msg.mtext, "n|%d|%s|", getpid(), recv_data); // n for NEW
+				msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+			} else {
+				// if not first time client send
+				// send message to elePowerCtrl
+				msg_t new_msg;
+				new_msg.mtype = 2;
+				sprintf(new_msg.mtext, "m|%d|%s|", getpid(), recv_data); // m for MODE
+				msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+			}
 		}
-		
-		// Create device instance for first time receive
-		if (is_first_message) {
-			is_first_message = 0;
-			sscanf(recv_data, "%[^|]|%d|%d", devices[no].name, &devices[no].normal, &devices[no].limit);
-			devices[no].pid = getpid();
-			devices[no].mode = 0;
-			tprintf("--- Connected device info ---\n");
-			tprintf("       name: %s\n", devices[no].name);
-			tprintf("     normal: %dW\n", devices[no].normal);
-			tprintf("      limit: %dW\n", devices[no].limit);
-			tprintf("   use mode: %s\n", use_mode[devices[no].mode]);
-			tprintf("-----------------------------\n\n");
-			sprintf(mess, "1 | A device connected\n");
-			continue;
-		}
-
-		devices[no].mode = atoi(recv_data);
-		tprintf("Device [%s] change mode to [%s]\n", devices[no].name, use_mode[devices[no].mode]);
-
 	} // endwhile
-} // end function
+} // end function powerSupply_handle
 
 void connectMng_handle() {
 	///////////////////////
@@ -190,18 +174,19 @@ void connectMng_handle() {
 			break;
 		}
 
+		// create new process powerSupply
 		if ((powerSupply = fork()) < 0){
 			tprintf("powerSupply fork() failed\n");
 			continue;
 		} 
 
 		if (powerSupply == 0) { 
-			//child
+			//in child
 			close(listen_sock);
 			powerSupply_handle(conn_sock);
 			close(conn_sock);
 		} else { 
-			//parent
+			//in parent
 			close(conn_sock);
 			powerSupply_count++;
 			tprintf("A device connected, connectMng forked new process powerSupply --- pid: %d.\n", powerSupply);
@@ -209,22 +194,110 @@ void connectMng_handle() {
 	} //end communication
 
 	close(listen_sock);
-} //end function
+} //end function connectMng_handle
 
 void elePowerCtrl_handle() {
-	while(1) {
+	// mtype = 2
+	msg_t got_msg;
 
+	//////////////////////////////
+	// Connect to shared memory //
+	//////////////////////////////
+	if ((devices = (device_t*) shmat(shmid_d, (void*) 0, 0)) == (void*)-1) {
+		tprintf("shmat() failed\n");
+		exit(1);
+	}
+
+	// check mail
+	while(1) {
+		// got mail!
+		if (msgrcv(msqid, &got_msg, MAX_MESSAGE_LENGTH, 2, 0) <= 0) {
+
+			tprintf("msgrcv() error");
+			exit(1);
+		}
+
+		// header = 'n' => Create new device
+		if (got_msg.mtext[0] == 'n') {
+			int no;
+			for (no = 0; no < MAX_DEVICE; no++) {
+				if (devices[no].pid == 0)
+					break;
+			}
+
+			sscanf(got_msg.mtext, "%*c|%d|%[^|]|%d|%d|",
+				&devices[no].pid,
+				devices[no].name,
+				&devices[no].normal,
+				&devices[no].limit);
+			devices[no].mode = 0;
+			tprintf("--- Connected device info ---\n");
+			tprintf("       name: %s\n", devices[no].name);
+			tprintf("     normal: %dW\n", devices[no].normal);
+			tprintf("      limit: %dW\n", devices[no].limit);
+			tprintf("   use mode: %s\n", use_mode[devices[no].mode]);
+			tprintf("-----------------------------\n\n");
+
+			// send message to logWrite
+			msg_t new_msg;
+			new_msg.mtype = 1;
+			sprintf(new_msg.mtext, "s|[%s] connected (Normal use: %dW, Linited use: %dW)|", 
+				devices[no].name, 
+				devices[no].normal, 
+				devices[no].limit);
+			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+
+			sprintf(new_msg.mtext, "s|Device [%s] set mode to [off] ~ using 0W|", devices[no].name);
+			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+		}
+
+		// header = 'm' => Change the mode!
+		if (got_msg.mtext[0] == 'm') {
+			int no, temp_pid, temp_mode;
+
+			sscanf(got_msg.mtext, "%*c|%d|%d|", &temp_pid, &temp_mode);
+
+			for (no = 0; no < MAX_DEVICE; no++) {
+				if (devices[no].pid == temp_pid)
+					devices[no].mode = temp_mode;
+				break;
+			}
+			tprintf("Device [%s] change mode to [%s]\n", 
+				devices[no].name, 
+				use_mode[devices[no].mode]);
+		}
+
+		// header = 'd' => Disconnect
+		if (got_msg.mtext[0] == 'd') {
+			int no, temp_pid;
+			sscanf(got_msg.mtext, "%*c|%d|", &temp_pid);
+
+			for (no = 0; no < MAX_DEVICE; no++) {
+				if (devices[no].pid == temp_pid) {
+					tprintf("Device [%s] disconnected\n\n", devices[no].name);
+					devices[no].pid = 0;
+					strcpy(devices[no].name, "");
+					devices[no].normal = 0;
+					devices[no].limit = 0;
+					devices[no].mode = 0;
+					break;
+				} else {
+					tprintf("Error! Device not found\n\n");
+				}
+			}
+		}
 	} // endwhile
-}
+} //end function elePowerCtrl_handle
 
 void powSupplyInfoAccess_handle() {
 	while(1) {
 		
 	} // endwhile
-}
+} //end function powSupplyInfoAccess_handle
 
 void logWrite_handle() { 
-	// header == 1 -> write server log
+	// mtype == 1
+	msg_t got_msg;
 
 	//////////////////////
 	// Create sever log //
@@ -236,32 +309,29 @@ void logWrite_handle() {
 	log_server = fopen(file_name, "w");
 	tprintf("Log server started, file is %s\n", file_name);
 
-	//////////////////////////////
-	// Connect to shared memory //
-	//////////////////////////////
-	// for ipc
-	char *mess;
-	if ((mess = (char*) shmat(shmid_m, (void*) 0, 0)) == (void*)-1) {
-		tprintf("shmat() failed\n");
-		exit(1);
-	}
+	///////////////////////////////
+	// Listen to other processes //
+	///////////////////////////////
+	while(1) {
+		// got mail!
+		if (msgrcv(msqid, &got_msg, MAX_MESSAGE_LENGTH, 1, 0) == -1) {
+			tprintf("msgrcv() error");
+			exit(1);
+		}
 
-	// Write log if requested
-	while (1) {
-		if (strlen(mess) && (mess[0] == '1')){
-			char buff[MESSAGE_MAX];
-			//extract from mess
-			memcpy(buff, &mess[4], strlen(mess) - 4);
+		// header = 's' => Write log to server
+		if (got_msg.mtext[0] == 's'){
+			char buff[MAX_MESSAGE_LENGTH];
+			//extract from message
+			sscanf(got_msg.mtext, "%*2c%[^|]|", buff);
 			// get time now
 			char log_time[20];
-			strftime(log_time, sizeof(log_time), "%Y-%m-%d_%H:%M:%S", now);
+			strftime(log_time, sizeof(log_time), "%Y/%m/%d_%H:%M:%S", now);
 			// write log
-			fprintf(log_server, "%s | %s", log_time, buff);
-			// delete mess in shared memory
-			memset(mess, '\0', MESSAGE_MAX);
+			fprintf(log_server, "%s | %s\n", log_time, buff);
 		}
 	}
-}
+} //end function logWrite_handle
 
 int main(int argc, char const *argv[])
 {
@@ -272,11 +342,11 @@ int main(int argc, char const *argv[])
 	server_port = atoi(argv[1]);
 	printf("SERVER start, PID is %d.\n", getpid());
 
-	//////////////////////////////////////
-	// Create shared memory for devices //
-	//////////////////////////////////////
+	/////////////////////////////////////////////
+	// Create shared memory for devices storage//
+	/////////////////////////////////////////////
 	if ((shmid_d = shmget(key_d, sizeof(device_t) * MAX_DEVICE, 0644 | IPC_CREAT)) < 0) {
-		tprintf("shmge() failed\n");
+		tprintf("shmget() failed\n");
 		exit(1);
 	}
 
@@ -296,25 +366,12 @@ int main(int argc, char const *argv[])
 	}
 
 	//////////////////////////////////
-	// Create shared memory for IPC //
+	// Create message queue for IPC //
 	//////////////////////////////////
-	// convention:
-	// <header (int)> | <body (string)>
-	// header = 0 -> no read
-	// header = 1 -> logWrite_handle
-	if ((shmid_m = shmget(key_m, MESSAGE_MAX, 0644 | IPC_CREAT)) < 0) {
-		tprintf("shmge() failed\n");
+	if ((msqid = msgget(key_m, 0644 | IPC_CREAT)) < 0) {
+		tprintf("msgget() failed\n");
 		exit(1);
 	}
-
-	// get da memory
-	char *mess;
-	if ((mess = (char*) shmat(shmid_m, (void*) 0, 0)) == (void*)-1) {
-		tprintf("shmat() failed\n");
-		exit(1);
-	}
-
-	memset(mess, '\0', MESSAGE_MAX);
 
 	///////////////////
 	// Handle Ctrl-C //
