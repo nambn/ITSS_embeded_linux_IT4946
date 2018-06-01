@@ -25,9 +25,23 @@ int main(int argc, char const *argv[])
 
 	// Get info for device
 	char name[50] = "T fucking V";
-	int mode_2 = 2300;
-	int mode_3 = 2000;
-	int use_mode = 1;
+	int mode_2 = 4700;
+	int mode_3 = 1000;
+	int use_mode = 0;
+
+	// Get info for device
+	char name[50];
+	int mode_2;
+	int mode_3;
+	int use_mode;
+	printf("Device name: ");
+	sscanf(stdin, "%^[\n]%*c", name);
+	printf("Normal power mode: ");
+	scanf("%d", &mode_2);
+	getchar();
+	printf("Limited power mode: ");
+	scanf("%d", &mode_3);
+	getchar();
 
 	// Step 0: Init variable
 	int client_sock;

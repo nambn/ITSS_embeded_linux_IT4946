@@ -44,7 +44,7 @@ struct sockaddr_in server;
 struct sockaddr_in client;
 int sin_size;
 char use_mode[][10] = {"off", "normal", "limited"};
-key_t key_s = 9999, key_d = 1234, key_m = 5678; //system info, device storage, message queue
+key_t key_s = 8888, key_d = 1234, key_m = 5678; //system info, device storage, message queue
 int shmid_s, shmid_d, msqid; //system info, device storage, message queue
 FILE *log_server;
 
@@ -53,6 +53,7 @@ typedef struct {
 	int current_power;
 	int threshold_over;
 	int supply_over;
+	int reset;
 } powsys_t;
 powsys_t *powsys;
 
@@ -87,6 +88,7 @@ int tprintf(const char* fmt, ...){
 
 void sigHandleSIGINT () {
 	msgctl(msqid, IPC_RMID, NULL);
+	shmctl(shmid_s, IPC_RMID, NULL);
 	shmctl(shmid_d, IPC_RMID, NULL);
 	fclose(log_server);
 	kill(0, SIGKILL);
@@ -96,6 +98,13 @@ void sigHandleSIGINT () {
 void powerSupply_handle(int conn_sock) {
 	// check if this is first time client sent
 	int is_first_message = 1;
+	//////////////////////////////
+	// Connect to shared memory //
+	//////////////////////////////
+	if ((powsys = (powsys_t*) shmat(shmid_s, (void*) 0, 0)) == (void*)-1) {
+		tprintf("shmat() failed\n");
+		exit(1);
+	}
 
 	while(1) {
 		///////////////////
@@ -219,14 +228,16 @@ void powSupplyInfoAccess_handle() {
 		exit(1);
 	}
 
-	// check mail
+	////////////////
+	// check mail //
+	////////////////
 	while(1) {
 		// got mail!
 		if (msgrcv(msqid, &got_msg, MAX_MESSAGE_LENGTH, 2, 0) <= 0) {
 			tprintf("msgrcv() error");
 			exit(1);
 		}
-		puts(got_msg.mtext);
+
 		// header = 'n' => Create new device
 		if (got_msg.mtext[0] == 'n') {
 			int no;
@@ -273,11 +284,25 @@ void powSupplyInfoAccess_handle() {
 			}
 			devices[no].mode = temp_mode;
 
-			tprintf("Device [%s] change mode to [%s], comsume %dW\n", 
+			// send message to logWrite
+			msg_t new_msg;
+			new_msg.mtype = 1;
+			char temp[MAX_MESSAGE_LENGTH];
+
+			sprintf(temp, "Device [%s] change mode to [%s], comsume %dW", 
 				devices[no].name, 
 				use_mode[devices[no].mode],
 				devices[no].use_power[devices[no].mode]);
-			tprintf("System power using: %dW\n", powsys->current_power);
+			tprintf("%s\n", temp);
+			sprintf(new_msg.mtext, "s|%s", temp);
+			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+
+			sleep(1);
+			sprintf(temp, "System power using: %dW", powsys->current_power);
+			tprintf("%s\n", temp);
+			sprintf(new_msg.mtext, "s|%s", temp);
+			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+
 		}
 
 		// header = 'd' => Disconnect
@@ -285,9 +310,16 @@ void powSupplyInfoAccess_handle() {
 			int no, temp_pid;
 			sscanf(got_msg.mtext, "%*c|%d|", &temp_pid);
 
+			// send message to logWrite
+			msg_t new_msg;
+			new_msg.mtype = 1;
+			char temp[MAX_MESSAGE_LENGTH];
+			
+			sprintf(temp, "Device [%s] disconnected", devices[no].name);
+
 			for (no = 0; no < MAX_DEVICE; no++) {
 				if (devices[no].pid == temp_pid) {
-					tprintf("Device [%s] disconnected\n\n", devices[no].name);
+					tprintf("%s\n\n", temp);
 					devices[no].pid = 0;
 					strcpy(devices[no].name, "");
 					devices[no].use_power[0] = 0;
@@ -299,6 +331,13 @@ void powSupplyInfoAccess_handle() {
 					tprintf("Error! Device not found\n\n");
 				}
 			}
+			sprintf(new_msg.mtext, "s|%s", temp);
+			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+
+			sprintf(temp, "System power using: %dW", powsys->current_power);
+			tprintf("%s\n", temp);
+			sprintf(new_msg.mtext, "s|%s", temp);
+			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
 		}
 
 	} // endwhile
@@ -319,13 +358,14 @@ void elePowerCtrl_handle() {
 	}
 
 	int i;
+	int check_warn_threshold = 0;
 
 	while(1) {
 		// get total power using
-		int temp = 0;
+		int sum_temp = 0;
 		for (i = 0; i < MAX_DEVICE; i++)
-			temp += devices[i].use_power[devices[i].mode];
-		powsys->current_power = temp;
+			sum_temp += devices[i].use_power[devices[i].mode];
+		powsys->current_power = sum_temp;
 
 		// check threshold
 		if (powsys->current_power >= POWER_THRESHOLD) {
@@ -334,9 +374,81 @@ void elePowerCtrl_handle() {
 		} else if (powsys->current_power >= WARNING_THRESHOLD) {
 			powsys->supply_over = 0;
 			powsys->threshold_over = 1;
+			powsys->reset = 0;
 		} else {
+			check_warn_threshold = 0;
 			powsys->supply_over = 0;
 			powsys->threshold_over = 0;
+			powsys->reset = 0;
+		}
+
+		// WARN over threshold
+		if (powsys->threshold_over && !check_warn_threshold) {
+			check_warn_threshold = 1;
+
+			// send message to logWrite
+			msg_t new_msg;
+			new_msg.mtype = 1;
+			char temp[MAX_MESSAGE_LENGTH];
+			sprintf(temp, "WARNING!!! Over threshold, power comsuming: %dW", powsys->current_power);
+			tprintf("%s\n", temp);
+			sprintf(new_msg.mtext, "s|%s", temp);
+			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+		}
+
+		// overload
+		if (powsys->supply_over) {
+			// send message to logWrite
+			msg_t new_msg;
+			new_msg.mtype = 1;
+			char temp[MAX_MESSAGE_LENGTH];
+
+			sprintf(temp, "DANGER!!! System overload, power comsuming: %dW", powsys->current_power);
+			tprintf("%s\n", temp);
+			sprintf(new_msg.mtext, "s|%s", temp);
+			msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+
+			tprintf("Server reset in 10 seconds\n");
+
+			int no;
+			for(no = 0; no < MAX_DEVICE; no++) {
+				if(devices[no].mode == 1) {
+					new_msg.mtype = 2;
+					sprintf(new_msg.mtext, "m|%d|2|", devices[no].pid);
+					msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+				}
+			}
+
+			pid_t my_child;
+			if ((my_child = fork()) == 0) {
+				// in child
+				sleep(5);
+
+				int no;
+				for(no = 0; no < MAX_DEVICE; no++) {
+					if(devices[no].mode != 0) {
+						new_msg.mtype = 2;
+						sprintf(new_msg.mtext, "m|%d|0|", devices[no].pid);
+						msgsnd(msqid, &new_msg, MAX_MESSAGE_LENGTH, 0);
+					}
+				}
+				kill(getpid(), SIGKILL);
+			} else {
+				//in parent
+				while (1) {
+					sum_temp = 0;
+					for (i = 0; i < MAX_DEVICE; i++)
+						sum_temp += devices[i].use_power[devices[i].mode];
+					powsys->current_power = sum_temp;
+
+					if (powsys->current_power < POWER_THRESHOLD) {
+						powsys->supply_over = 0;
+						tprintf("OK, power now is %d", powsys->current_power);
+						kill(my_child, SIGKILL);
+						break;
+					}
+				}
+			}
 		}
 	} // endwhile
 } //end function elePowerCtrl_handle
@@ -388,7 +500,6 @@ void logWrite_handle() {
 			strftime(log_time, sizeof(log_time), "%Y/%m/%d_%H:%M:%S", now);
 			// write log
 			fprintf(log_server, "%s | %s\n", log_time, buff);
-			fprintf(log_server, "%s | Current power: %d\n", log_time, powsys->current_power);
 		}
 	}
 } //end function logWrite_handle
@@ -416,6 +527,7 @@ int main(int argc, char const *argv[])
 	powsys->current_power = 0;
 	powsys->threshold_over = 0;
 	powsys->supply_over = 0;
+	powsys->reset = 0;
 
 	/////////////////////////////////////////////
 	// Create shared memory for devices storage//
